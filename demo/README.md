@@ -50,39 +50,101 @@ scripts/                     avaliar.sh (local) e preparar-demo.sh (branches da 
 
 ## Rodar localmente
 
-Testes sem modelo, os mesmos do CI (0 tokens):
+### Preparar o Azure OpenAI
+
+Este é o passo a passo para executar a demo localmente depois de criar o recurso e as implantações:
+
+1. Confirme que o recurso tem estas implantações, com estes nomes exatos:
+   - `gpt-5-mini`: assistente, conforme `ia/assistente.json`.
+   - `gpt-5`: juiz, conforme `evals/portao.json`.
+   - `gpt-5-nano`: opcional, usado pela demonstração de troca de modelo.
+2. No recurso Azure OpenAI, abra **Access control (IAM)** e selecione **Add role assignment**.
+3. Escolha a role **Cognitive Services OpenAI User**.
+4. Em **Members**, selecione a identidade que vai executar a demo. Para execução local, escolha sua conta de usuário; para o GitHub Actions, escolha o service principal usado pelo OIDC.
+5. Conclua em **Review + assign**. A propagação da permissão pode levar alguns minutos.
+6. Copie o endpoint do recurso, no formato `https://<nome-do-recurso>.openai.azure.com`.
+
+O código usa a API compatível com Azure OpenAI. Um endpoint de projeto do Microsoft Foundry (`*.services.ai.azure.com/api/projects/...`) não é aceito diretamente por esta versão da demo.
+
+### Configurar e validar a máquina
+
+Abra um terminal na raiz do repositório e valide as ferramentas:
 
 ```bash
-dotnet test --project tests/ConectaSuporte.Tests
+dotnet --version             # deve ser 10.x; o global.json fixa 10.0.400
+az login
+az account show             # confirme a subscription e a conta corretas
 ```
 
-Com modelo real:
+Defina o endpoint para a sessão atual do terminal:
 
 ```bash
-export AZURE_OPENAI_ENDPOINT=https://<seu-recurso>.openai.azure.com
-az login   # ou: export AZURE_OPENAI_API_KEY=...
-
-# 1. O juiz é confiável?
-dotnet test --project tests/ConectaSuporte.Evals -- --filter-trait "etapa=calibracao"
-
-# 2. O working tree piorou o produto em relação ao origin/main?
-scripts/avaliar.sh smoke
-scripts/avaliar.sh completo origin/main
-
-# 3. Relatório HTML de todas as métricas
-dotnet tool restore
-dotnet aieval report --path artifacts/evals --output artifacts/evals/relatorio.html --open
+export AZURE_OPENAI_ENDPOINT="https://<nome-do-recurso>.openai.azure.com"
 ```
 
-Os relatórios ficam em `artifacts/evals/`: `relatorio.md` (o mesmo texto do comentário do PR), `calibracao.md`, `resultado.json`, e as pastas `cache/` e `results/` do `Microsoft.Extensions.AI.Evaluation.Reporting`.
+A autenticação preferida é Entra ID, usando a sessão do `az login`. Não é necessário configurar uma chave. Se a organização exigir chave, use a alternativa abaixo, sem commitar o valor:
 
-A API:
+```bash
+export AZURE_OPENAI_API_KEY="<sua-chave>"
+```
+
+Faça primeiro a validação sem consumir tokens:
+
+```bash
+cd demo
+dotnet test tests/ConectaSuporte.Tests/ConectaSuporte.Tests.csproj
+```
+
+Depois confirme a conexão e o acesso ao modelo do assistente com uma única chamada da API:
 
 ```bash
 dotnet run --project src/ConectaSuporte.Api --urls http://localhost:5080
-curl -s http://localhost:5080/perguntas -H 'Content-Type: application/json' \
+```
+
+Em outro terminal, repita a definição de `AZURE_OPENAI_ENDPOINT` (e a chave, se usar) e execute:
+
+```bash
+curl -s http://localhost:5080/perguntas \
+  -H 'Content-Type: application/json' \
   -d '{"texto":"Tenho 4 meses de contrato e quero cancelar. Vou pagar multa?"}'
 ```
+
+A resposta deve ser JSON estruturado. Um `401` ou `403` normalmente indica login ausente ou role ainda não propagada; um `404` normalmente indica nome de implantação incorreto.
+
+### Executar a avaliação da demo
+
+Com a API encerrada (`Ctrl+C`), calibre primeiro o juiz. Esta etapa consome chamadas na implantação `gpt-5`:
+
+```bash
+cd demo
+dotnet test tests/ConectaSuporte.Evals/ConectaSuporte.Evals.csproj -- \
+  --filter-trait "etapa=calibracao"
+```
+
+Se a calibração passar, volte à raiz do repositório e rode o portão em nível `smoke`:
+
+```bash
+cd ..
+demo/scripts/avaliar.sh smoke
+```
+
+Para comparar o working tree com `origin/main`, a referência precisa existir localmente:
+
+```bash
+git fetch origin main
+demo/scripts/avaliar.sh completo origin/main
+```
+
+Os relatórios ficam em `demo/artifacts/evals/`. Para gerar o HTML:
+
+```bash
+cd demo
+dotnet tool restore
+dotnet aieval report --path artifacts/evals \
+  --output artifacts/evals/relatorio.html --open
+```
+
+Os relatórios ficam em `artifacts/evals/`: `relatorio.md` (o mesmo texto do comentário do PR), `calibracao.md`, `resultado.json`, e as pastas `cache/` e `results/` do `Microsoft.Extensions.AI.Evaluation.Reporting`.
 
 ### Variáveis de ambiente dos evals
 

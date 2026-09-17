@@ -28,5 +28,5 @@ jobs:
         working-directory: demo
 
       # Contrato, avaliadores determinísticos, estatística do portão e dataset: 0 tokens.
-      - run: dotnet test --project tests/ConectaSuporte.Tests -c Release --no-build
+      - run: dotnet test tests/ConectaSuporte.Tests/ConectaSuporte.Tests.csproj -c Release --no-build
         working-directory: demo

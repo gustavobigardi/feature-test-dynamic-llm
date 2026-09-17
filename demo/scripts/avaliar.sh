@@ -23,5 +23,5 @@ echo "Baseline: $base ($(git -C "$baseline" rev-parse --short HEAD)) · candidat
 (
   cd "$demo"
   EVAL_NIVEL="$nivel" EVAL_BASELINE_DIR="$baseline/demo" \
-    dotnet test --project tests/ConectaSuporte.Evals -- --filter-trait "etapa=portao"
+    dotnet test tests/ConectaSuporte.Evals/ConectaSuporte.Evals.csproj -- --filter-trait "etapa=portao"
 )

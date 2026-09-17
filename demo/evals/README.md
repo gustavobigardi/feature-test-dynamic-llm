@@ -52,7 +52,7 @@ As regras que dizem se o assistente está bom. Mudar qualquer arquivo daqui é m
 1. Pelo menos duas pessoas rotulam cada resposta como aprovada ou reprovada, com motivo. Quando elas discordam, a rubrica está ambígua; resolva isso antes de medir o juiz.
 2. Preencha `revisadoPor`. Os rótulos deste repositório são propostas e continuam com `null` até alguém revisar.
 3. Inclua respostas ruins **sutis**: valor omitido, previsão inventada, isenção garantida antes da análise. Só respostas obviamente ruins não medem nada.
-4. Rode `dotnet test --project tests/ConectaSuporte.Evals -- --filter-trait "etapa=calibracao"` e leia `artifacts/evals/calibracao.md`.
+4. Rode `dotnet test tests/ConectaSuporte.Evals/ConectaSuporte.Evals.csproj -- --filter-trait "etapa=calibracao"` e leia `artifacts/evals/calibracao.md`.
 5. Se o juiz reprovar, ajuste a rubrica ou troque o modelo do juiz. Não reduza o critério para passar.
 6. **Mudou a base de conhecimento? Revise os rótulos.** A calibração usa a base do candidato; um rótulo que cita "R$ 200,00" fica defasado se a regra da multa mudar.
 

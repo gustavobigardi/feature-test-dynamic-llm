@@ -136,7 +136,7 @@ jobs:
           restore-keys: respostas-ia-
 
       - name: dotnet test (portão de qualidade)
-        run: dotnet test --project tests/ConectaSuporte.Evals -c Release -- --filter-trait "etapa=portao"
+        run: dotnet test tests/ConectaSuporte.Evals/ConectaSuporte.Evals.csproj -c Release -- --filter-trait "etapa=portao"
         working-directory: demo
 
       - name: Salvar cache de respostas
