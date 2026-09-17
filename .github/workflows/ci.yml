@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testes:
+    name: build e testes (sem modelo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: demo/global.json
+
+      - run: dotnet build ConectaSuporte.slnx -c Release
+        working-directory: demo
+
+      # Contrato, avaliadores determinísticos, estatística do portão e dataset: 0 tokens.
+      - run: dotnet test --project tests/ConectaSuporte.Tests -c Release --no-build
+        working-directory: demo

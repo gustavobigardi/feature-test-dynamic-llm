@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI.Evaluation" />
+    <PackageReference Include="Microsoft.Extensions.AI.Evaluation.Reporting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ConectaSuporte\ConectaSuporte.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,27 @@
+{
+  "juiz": {
+    "modelo": "gpt-5",
+    "notaMinima": 4
+  },
+  "calibracao": {
+    "concordanciaMinima": 0.85,
+    "kappaMinimo": 0.7,
+    "falsosAceitesCriticosMaximos": 0
+  },
+  "niveis": {
+    "smoke": { "casos": "smoke", "amostrasPorCaso": 3, "orcamentoTokens": 1500000 },
+    "completo": { "casos": "todos", "amostrasPorCaso": 5, "orcamentoTokens": 4000000 }
+  },
+  "decisao": {
+    "taxaMinima": 0.8,
+    "margem": 0.05,
+    "confianca": 0.95,
+    "reamostras": 10000,
+    "semente": 2026,
+    "inconclusivoBloqueia": true
+  },
+  "execucao": {
+    "paralelismo": 6,
+    "validadeCacheDias": 7
+  }
+}

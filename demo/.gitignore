@@ -1,0 +1,14 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+
+# Avaliações: resultados, cache de respostas e worktree da baseline
+artifacts/
+.baseline/
+
+# SO / editores
+.DS_Store
+.idea/

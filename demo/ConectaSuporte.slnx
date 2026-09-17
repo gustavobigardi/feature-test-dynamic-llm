@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ConectaSuporte/ConectaSuporte.csproj" />
+    <Project Path="src/ConectaSuporte.Api/ConectaSuporte.Api.csproj" />
+    <Project Path="src/ConectaSuporte.Avaliacao/ConectaSuporte.Avaliacao.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ConectaSuporte.Tests/ConectaSuporte.Tests.csproj" />
+    <Project Path="tests/ConectaSuporte.Evals/ConectaSuporte.Evals.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,219 @@
+name: Portão de qualidade de IA
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  push:
+    branches: [main]
+  schedule:
+    # Segunda-feira, 06:00 BRT: nível completo sem cache, para pegar drift do modelo.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      nivel:
+        description: Nível da avaliação
+        type: choice
+        options: [smoke, completo]
+        default: completo
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: portao-ia-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  escopo:
+    name: escopo
+    runs-on: ubuntu-latest
+    outputs:
+      avaliar: ${{ steps.escopo.outputs.avaliar }}
+      nivel: ${{ steps.escopo.outputs.nivel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: escopo
+        name: A mudança afeta a IA?
+        env:
+          EVENTO: ${{ github.event_name }}
+          BASE_PR: ${{ github.event.pull_request.base.sha }}
+          HEAD_PR: ${{ github.event.pull_request.head.sha }}
+          ANTES: ${{ github.event.before }}
+          ROTULO_COMPLETO: ${{ contains(github.event.pull_request.labels.*.name, 'eval:completo') }}
+          NIVEL_MANUAL: ${{ inputs.nivel }}
+        run: |
+          set -euo pipefail
+          case "$EVENTO" in
+            schedule)          avaliar=true; nivel=completo ;;
+            workflow_dispatch) avaliar=true; nivel="${NIVEL_MANUAL:-completo}" ;;
+            *)
+              if [ "$EVENTO" = pull_request ]; then base="$BASE_PR"; head="$HEAD_PR"; else base="$ANTES"; head="$GITHUB_SHA"; fi
+              if [ "$base" = "0000000000000000000000000000000000000000" ]; then
+                mudancas="(branch nova)"
+              else
+                mudancas=$(git diff --name-only "$base" "$head" -- \
+                  demo/ia demo/evals demo/src demo/tests/ConectaSuporte.Evals demo/Directory.Packages.props demo/global.json .github/workflows/portao-ia.yml)
+              fi
+              if [ -n "$mudancas" ]; then avaliar=true; else avaliar=false; fi
+              if [ "$EVENTO" = push ] || [ "$ROTULO_COMPLETO" = true ]; then nivel=completo; else nivel=smoke; fi
+              echo "Arquivos que afetam a IA:"; echo "${mudancas:-(nenhum)}"
+              ;;
+          esac
+          echo "avaliar=$avaliar nivel=$nivel"
+          { echo "avaliar=$avaliar"; echo "nivel=$nivel"; } >> "$GITHUB_OUTPUT"
+
+  avaliar:
+    name: avaliar (${{ needs.escopo.outputs.nivel }})
+    needs: escopo
+    # Forks não recebem credenciais: um mantenedor revisa e roda em uma branch interna.
+    if: >-
+      needs.escopo.outputs.avaliar == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AZURE_OPENAI_ENDPOINT: ${{ vars.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      EVAL_NIVEL: ${{ needs.escopo.outputs.nivel }}
+      EVAL_ARTEFATOS: ${{ github.workspace }}/artifacts/evals
+      EVAL_EXECUCAO: run-${{ github.run_id }}-${{ github.run_attempt }}
+      EVAL_SEM_CACHE: ${{ github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configuração obrigatória
+        run: |
+          if [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
+            echo "::error::Defina a variable AZURE_OPENAI_ENDPOINT. Sem ela os evals seriam pulados e o portão ficaria verde sem avaliar nada."
+            exit 1
+          fi
+
+      - name: Baseline (versão anterior do pacote de IA)
+        env:
+          EVENTO: ${{ github.event_name }}
+          BASE_PR: ${{ github.event.pull_request.base.sha }}
+          ANTES: ${{ github.event.before }}
+        run: |
+          case "$EVENTO" in
+            pull_request) base="$BASE_PR" ;;
+            push) base="$ANTES" ;;
+            workflow_dispatch) if [ "$GITHUB_REF" = refs/heads/main ]; then base=""; else base=origin/main; fi ;;
+            *) base="" ;;
+          esac
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "Sem baseline: valem só os critérios absolutos (casos críticos e taxa mínima)."
+            exit 0
+          fi
+          git worktree add --detach "$RUNNER_TEMP/baseline" "$base"
+          echo "EVAL_BASELINE_DIR=$RUNNER_TEMP/baseline/demo" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: demo/global.json
+
+      - name: Login no Azure (OIDC, sem segredo)
+        if: env.AZURE_OPENAI_API_KEY == ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Resposta que já foi gerada e julgada com o mesmo prompt, modelo e caso não é paga de novo.
+      - name: Restaurar cache de respostas
+        if: github.event_name != 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: artifacts/evals/cache
+          key: respostas-ia-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: respostas-ia-
+
+      - name: dotnet test (portão de qualidade)
+        run: dotnet test --project tests/ConectaSuporte.Evals -c Release -- --filter-trait "etapa=portao"
+        working-directory: demo
+
+      - name: Salvar cache de respostas
+        if: always() && github.event_name != 'schedule'
+        uses: actions/cache/save@v4
+        with:
+          path: artifacts/evals/cache
+          key: respostas-ia-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Relatório no resumo do job
+        if: always()
+        run: |
+          for arquivo in relatorio.md calibracao.md; do
+            if [ -f "$EVAL_ARTEFATOS/$arquivo" ]; then
+              cat "$EVAL_ARTEFATOS/$arquivo" >> "$GITHUB_STEP_SUMMARY"
+              break
+            fi
+          done
+
+      - name: Comentar no PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          arquivo="$EVAL_ARTEFATOS/relatorio.md"
+          [ -f "$arquivo" ] || arquivo="$EVAL_ARTEFATOS/calibracao.md"
+          if [ ! -f "$arquivo" ]; then
+            arquivo="$RUNNER_TEMP/comentario.md"
+            printf '## ❌ Portão de qualidade de IA: erro de execução\n\nA avaliação não gerou relatório. Execução incompleta não é aprovação: veja o log em %s\n' \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$arquivo"
+          fi
+          gh pr comment "$PR" --edit-last --body-file "$arquivo" || gh pr comment "$PR" --body-file "$arquivo"
+
+      - name: Relatório HTML (aieval)
+        if: always()
+        run: |
+          if [ -d "$EVAL_ARTEFATOS/results" ]; then
+            dotnet tool restore
+            dotnet aieval report --path "$EVAL_ARTEFATOS" --output "$EVAL_ARTEFATOS/relatorio.html"
+          fi
+        working-directory: demo
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: portao-ia-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/evals/*.md
+            artifacts/evals/*.json
+            artifacts/evals/*.html
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Check obrigatório na proteção da branch. Roda sempre: job pulado ou cancelado não vira aprovação.
+  portao:
+    name: portao-ia
+    needs: [escopo, avaliar]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decisão
+        env:
+          ESCOPO: ${{ needs.escopo.result }}
+          AVALIAR: ${{ needs.escopo.outputs.avaliar }}
+          RESULTADO: ${{ needs.avaliar.result }}
+        run: |
+          if [ "$ESCOPO" != success ]; then
+            echo "::error::Não foi possível calcular o escopo da mudança."
+            exit 1
+          fi
+          if [ "$AVALIAR" != true ]; then
+            echo "Nada que afete a IA mudou: portão liberado sem gastar tokens."
+            exit 0
+          fi
+          if [ "$RESULTADO" != success ]; then
+            echo "::error::Avaliação terminou como '$RESULTADO'. Reprovada, cancelada, pulada (fork) ou incompleta não é aprovação."
+            exit 1
+          fi
+          echo "Portão de qualidade de IA aprovado."
