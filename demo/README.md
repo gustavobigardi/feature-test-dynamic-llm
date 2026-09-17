@@ -185,10 +185,27 @@ A execução semanal roda **sem cache**, porque cache não detecta drift do mode
 
 Configuração:
 
-1. **Variables** do repositório: `AZURE_OPENAI_ENDPOINT`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` e `AZURE_SUBSCRIPTION_ID`. A identidade usa federated credentials para `repo:<owner>/<repo>:pull_request` e `repo:<owner>/<repo>:ref:refs/heads/main`, com o papel Cognitive Services OpenAI User no recurso. Como alternativa ao OIDC, cadastre o secret `AZURE_OPENAI_API_KEY`.
-2. Crie o rótulo `eval:completo`.
-3. Na proteção do main, exija os checks **`build e testes (sem modelo)`** e **`portao-ia`**. O job `portao-ia` sempre roda: avaliação pulada, cancelada ou incompleta não vira aprovação, e PR que não afeta a IA passa sem gastar tokens.
-4. Proteja `demo/evals/`, `demo/tests/ConectaSuporte.Evals/` e `.github/workflows/` com CODEOWNERS. Quem edita o portão consegue afrouxá-lo; o YAML não substitui a revisão.
+1. No Azure, crie um **App Registration** exclusivo para o GitHub Actions e seu service principal. Crie duas federated credentials, sem secret:
+  - `repo:<owner>/<repo>:ref:refs/heads/main`
+  - `repo:<owner>/<repo>:pull_request`
+  Use o issuer `https://token.actions.githubusercontent.com` e a audience `api://AzureADTokenExchange`.
+2. Atribua ao service principal a role **Cognitive Services OpenAI User** no recurso Azure OpenAI.
+3. Em **Settings > Secrets and variables > Actions > Variables**, cadastre `AZURE_OPENAI_ENDPOINT`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` e `AZURE_SUBSCRIPTION_ID`. Não coloque client secret ou chave de API no código.
+4. Crie o label `eval:completo`. Adicioná-lo a um PR muda a avaliação de `smoke` para `completo`.
+5. Na proteção de `main`, exija os checks **`build e testes (sem modelo)`** e **`portao-ia`**. O job `portao-ia` sempre roda: avaliação pulada, cancelada ou incompleta não vira aprovação, e PR que não afeta a IA passa sem gastar tokens.
+6. Proteja `demo/evals/`, `demo/tests/ConectaSuporte.Evals/` e `.github/workflows/` com CODEOWNERS. Quem edita o portão consegue afrouxá-lo; o YAML não substitui a revisão.
+
+Para repetir a configuração com GitHub CLI, substitua os valores entre `<...>`:
+
+```bash
+gh variable set AZURE_OPENAI_ENDPOINT --body "https://<recurso>.openai.azure.com"
+gh variable set AZURE_CLIENT_ID --body "<application-client-id>"
+gh variable set AZURE_TENANT_ID --body "<tenant-id>"
+gh variable set AZURE_SUBSCRIPTION_ID --body "<subscription-id>"
+gh label create eval:completo --description "Executa a avaliação completa de qualidade de IA" --color 1D76DB
+```
+
+Depois de publicar o workflow, use **Actions > Portão de qualidade de IA > Run workflow** para uma execução manual. Escolha `smoke` para o primeiro teste; `completo` faz mais chamadas ao modelo. Em um PR que altera `demo/ia/`, o workflow também é acionado automaticamente.
 
 PRs de forks não recebem credenciais. Um mantenedor revisa o código e roda a avaliação em uma branch interna.
 
