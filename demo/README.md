@@ -16,6 +16,7 @@ PR mexe em ia/ ──► CI: build + testes (0 tokens) ────────�
 | O que muda o comportamento da IA? | [`ia/`](ia): [`prompt.md`](ia/prompt.md), [`assistente.json`](ia/assistente.json) (modelo) e [`conhecimento/`](ia/conhecimento). Tudo versionado; o relatório mostra o hash do pacote avaliado |
 | O que é uma resposta boa? | [`evals/dataset/casos.jsonl`](evals/dataset/casos.jsonl): 32 casos comuns, de borda e adversariais, com o que a resposta **deve** e **não pode** fazer |
 | O que o código consegue verificar? | [Avaliadores determinísticos](src/ConectaSuporte.Avaliacao/Avaliadores/AvaliadoresDeterministicos.cs): contrato, valores obrigatórios, promessas literais, encaminhamento, categoria, fontes, CPF/cartão e vazamento do prompt |
+| O que não deve depender do modelo? | [`AssistenteSuporte`](src/ConectaSuporte/AssistenteSuporte.cs): políticas absolutas para senha, cartão, CPF e instruções internas respondem deterministicamente antes de chamar o LLM |
 | E o que o código não alcança? | [`JuizDeQualidade`](src/ConectaSuporte.Avaliacao/Avaliadores/JuizDeQualidade.cs): LLM-as-judge com [rubrica](evals/juiz/rubrica.md). O juiz dá nota e evidência; o código decide |
 | Por que confiar no juiz? | [Calibração](src/ConectaSuporte.Avaliacao/Calibracao/Calibracao.cs) contra [24 rótulos humanos](evals/calibracao/rotulos.jsonl) antes de cada avaliação: concordância, kappa de Cohen e zero falso aceite em caso crítico |
 | Como afirmar que piorou? | Cada caso roda N vezes no main e no PR. Um bootstrap por caso gera o intervalo de confiança da diferença. Margem, taxa mínima e tolerância zero para casos críticos ficam em [`evals/portao.json`](evals/portao.json) |
@@ -185,10 +186,27 @@ A execução semanal roda **sem cache**, porque cache não detecta drift do mode
 
 Configuração:
 
-1. **Variables** do repositório: `AZURE_OPENAI_ENDPOINT`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` e `AZURE_SUBSCRIPTION_ID`. A identidade usa federated credentials para `repo:<owner>/<repo>:pull_request` e `repo:<owner>/<repo>:ref:refs/heads/main`, com o papel Cognitive Services OpenAI User no recurso. Como alternativa ao OIDC, cadastre o secret `AZURE_OPENAI_API_KEY`.
-2. Crie o rótulo `eval:completo`.
-3. Na proteção do main, exija os checks **`build e testes (sem modelo)`** e **`portao-ia`**. O job `portao-ia` sempre roda: avaliação pulada, cancelada ou incompleta não vira aprovação, e PR que não afeta a IA passa sem gastar tokens.
-4. Proteja `demo/evals/`, `demo/tests/ConectaSuporte.Evals/` e `.github/workflows/` com CODEOWNERS. Quem edita o portão consegue afrouxá-lo; o YAML não substitui a revisão.
+1. No Azure, crie um **App Registration** exclusivo para o GitHub Actions e seu service principal. Crie duas federated credentials, sem secret:
+  - `repo:<owner>/<repo>:ref:refs/heads/main`
+  - `repo:<owner>/<repo>:pull_request`
+  Use o issuer `https://token.actions.githubusercontent.com` e a audience `api://AzureADTokenExchange`.
+2. Atribua ao service principal a role **Cognitive Services OpenAI User** no recurso Azure OpenAI.
+3. Em **Settings > Secrets and variables > Actions > Variables**, cadastre `AZURE_OPENAI_ENDPOINT`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` e `AZURE_SUBSCRIPTION_ID`. Não coloque client secret ou chave de API no código.
+4. Crie o label `eval:completo`. Adicioná-lo a um PR muda a avaliação de `smoke` para `completo`.
+5. Na proteção de `main`, exija os checks **`build e testes (sem modelo)`** e **`portao-ia`**. O job `portao-ia` sempre roda: avaliação pulada, cancelada ou incompleta não vira aprovação, e PR que não afeta a IA passa sem gastar tokens.
+6. Proteja `demo/evals/`, `demo/tests/ConectaSuporte.Evals/` e `.github/workflows/` com CODEOWNERS. Quem edita o portão consegue afrouxá-lo; o YAML não substitui a revisão.
+
+Para repetir a configuração com GitHub CLI, substitua os valores entre `<...>`:
+
+```bash
+gh variable set AZURE_OPENAI_ENDPOINT --body "https://<recurso>.openai.azure.com"
+gh variable set AZURE_CLIENT_ID --body "<application-client-id>"
+gh variable set AZURE_TENANT_ID --body "<tenant-id>"
+gh variable set AZURE_SUBSCRIPTION_ID --body "<subscription-id>"
+gh label create eval:completo --description "Executa a avaliação completa de qualidade de IA" --color 1D76DB
+```
+
+Depois de publicar o workflow, use **Actions > Portão de qualidade de IA > Run workflow** para uma execução manual. Escolha `smoke` para o primeiro teste; `completo` faz mais chamadas ao modelo. Em um PR que altera `demo/ia/`, o workflow também é acionado automaticamente.
 
 PRs de forks não recebem credenciais. Um mantenedor revisa o código e roda a avaliação em uma branch interna.
 

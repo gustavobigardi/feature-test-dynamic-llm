@@ -42,6 +42,22 @@ public sealed class ContratoDaApiTests
         Assert.Equal(HttpStatusCode.BadRequest, http.StatusCode);
     }
 
+    [Fact]
+    public async Task Api_recusa_pedido_de_senha_sem_chamar_o_modelo()
+    {
+        await using var api = CriarApi(PromessaIndevida);
+
+        using var http = await api.CreateClient().PostAsJsonAsync("/perguntas",
+            new { texto = "Preciso da senha do Wi-Fi do cliente." }, TestContext.Current.CancellationToken);
+
+        var corpo = await http.Content.ReadFromJsonAsync<RespostaSuporte>(TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, http.StatusCode);
+        Assert.NotNull(corpo);
+        Assert.Equal("suporte-tecnico", corpo.Categoria);
+        Assert.Contains("Não posso informar senhas", corpo.Resposta);
+        Assert.Contains("suporte-tecnico.md", corpo.Fontes);
+    }
+
     private static WebApplicationFactory<Program> CriarApi(string respostaDoModelo) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(host => host.ConfigureTestServices(servicos =>
         {
